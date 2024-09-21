@@ -2,30 +2,40 @@
 #include <X11/Xutil.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <unistd.h>
 
 #include "structs.h"
+#include "config.h"
 
 #define SCREEN_WIDTH    XDisplayWidth(dpy, DefaultScreen(dpy))
 #define SCREEN_HEIGHT   XDisplayHeight(dpy, DefaultScreen(dpy))
 #define TITLEBAR_HEIGHT	5
 
+
 /* Variables */
 Display *dpy;
-CustomConfig cfg;
 
 int GAPS_SIZE = 15;
-int BORDER_THICKNESS = 5;
+int BORDER_THICKNESS = 3;
 int openWindows = 0;
 
+
 /* Function Declarations*/
+
+// Main Loop
 void Cases(XEvent *, KeyCode *);
 void Configure(void);
-void ConfigureWindowRequest(XEvent *);
-void Error(char *, int, int);
-void HandleConfigureRequest(XWindowChanges *, XConfigureRequestEvent *);
-void InitialChecks(int, char *);
 void Run(void);
+void InitialChecks(int, char *);
+
+// Requests
+void ConfigureWindowRequest(XEvent *);
+void HandleConfigureRequest(XWindowChanges *, XConfigureRequestEvent *);
+
+// Misc
+void Error(char *, int, int);
+
 
 /* Functions */
 void
@@ -125,12 +135,9 @@ HandleConfigureRequest(XWindowChanges *changes, XConfigureRequestEvent *ev)
 void
 HandleKeyPress(XEvent *e, KeyCode key)
 {
-	if (e->xkey.keycode == key && (e->xkey.state & Mod1Mask))
-	{
-		if (fork() == 0) {
-			execlp("st", "", NULL);
-			exit(0);
-		}
+	if ((e->xkey.keycode == key && (e->xkey.state & Mod1Mask)) && fork() == 0) {
+		execlp("st", "", NULL);
+		exit(0);
 	}
 }
 
@@ -159,6 +166,7 @@ main(int argc, char *argv[])
 {
 	InitialChecks(argc, *argv);
 	Run();
+
 
 	XCloseDisplay(dpy);
 	return EXIT_SUCCESS;
