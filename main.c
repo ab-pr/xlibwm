@@ -51,8 +51,6 @@ Error(char *ErrorMessage, int ERROR_CODE, int EXIT)
 {
 	/* Outputs error message and dies 💀 */
 	fprintf(stderr, "%s", ErrorMessage);
-
-	if (EXIT)
 		exit(ERROR_CODE);
 }
 
@@ -75,11 +73,9 @@ Run()
 	XSelectInput(dpy, root, SubstructureRedirectMask | SubstructureNotifyMask | KeyPressMask);
 
 	for(;;) {
-
 		XEvent e;
 		XNextEvent(dpy, &e);
 		Cases(&e, &enter);
-
 	}
 }
 
@@ -137,7 +133,7 @@ HandleKeyPress(XEvent *e, KeyCode key)
 {
 	if ((e->xkey.keycode == key && (e->xkey.state & Mod1Mask)) && fork() == 0) {
 		execlp("st", "", NULL);
-		exit(0);
+	//	exit(0);
 	}
 }
 
