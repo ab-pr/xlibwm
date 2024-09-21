@@ -1,27 +1,44 @@
-#include <X11/X.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "structs.h"
+
+#define SCREEN_WIDTH    XDisplayWidth(dpy, DefaultScreen(dpy))
+#define SCREEN_HEIGHT   XDisplayHeight(dpy, DefaultScreen(dpy))
+#define TITLEBAR_HEIGHT	5
+
+/* Variables */
 Display *dpy;
+CustomConfig cfg;
 
-void Error(char*, int, int);
-void InitialChecks(int, char*);
-void Run();
-void Cases(XEvent*, KeyCode);
+int GAPS_SIZE = 15;
+int BORDER_THICKNESS = 5;
+int openWindows = 0;
 
-void HandleConfigureRequest(XWindowChanges *changes, XEvent *e);
+/* Function Declarations*/
+void Cases(XEvent *, KeyCode *);
+void Configure(void);
+void ConfigureWindowRequest(XEvent *);
+void Error(char *, int, int);
+void HandleConfigureRequest(XWindowChanges *, XConfigureRequestEvent *);
+void InitialChecks(int, char *);
+void Run(void);
 
-void InitialChecks(int argc, char *argv) {
+/* Functions */
+void
+InitialChecks(int argc, char *argv)
+{
 	/* Initial checks to make sure the program can run */
 	if (!(dpy = XOpenDisplay(NULL)))
 		Error("Can't open the display\n", EXIT_FAILURE, True);
 }
 
 void
-Error(char *ErrorMessage, int ERROR_CODE, int EXIT) {
+Error(char *ErrorMessage, int ERROR_CODE, int EXIT)
+{
 	/* Outputs error message and dies 💀 */
 	fprintf(stderr, "%s", ErrorMessage);
 
@@ -29,78 +46,118 @@ Error(char *ErrorMessage, int ERROR_CODE, int EXIT) {
 		exit(ERROR_CODE);
 }
 
-void Configure() {
-
+void
+Configure()
+{
+	/* Configures the custom settings set by the user */
 }
 
 void
-Run() {
+Run()
+{
 	/* Main loop of program */
 	Window root = DefaultRootWindow(dpy);
-	int windowCount;
-	windowCount = 0;
-	++windowCount;
-    // Capture the "Alt+Return" key combination
-    KeyCode keycode = XKeysymToKeycode(dpy, XStringToKeysym("Return"));
-    XGrabKey(dpy, keycode, Mod1Mask, root, True, GrabModeAsync, GrabModeAsync);
 
+	KeyCode enter = XKeysymToKeycode(dpy, XStringToKeysym("Return"));
+    XGrabKey(dpy, enter, Mod1Mask, root, True, GrabModeAsync, GrabModeAsync);
 
-	XSelectInput(dpy, root, SubstructureNotifyMask | SubstructureRedirectMask);
+	/* Configure();  TODO */
+	XSelectInput(dpy, root, SubstructureRedirectMask | SubstructureNotifyMask | KeyPressMask);
+
 	for(;;) {
-		
+
 		XEvent e;
 		XNextEvent(dpy, &e);
-		Cases(&e, keycode);
+		Cases(&e, &enter);
 
 	}
 }
 
 void
-Cases(XEvent *e, KeyCode keycode) {
+ConfigureWindowRequest(XEvent *e)
+{
+    XWindowChanges changes;
+    XConfigureRequestEvent *configRequest = &e->xconfigurerequest;
+
+    configRequest->height = SCREEN_HEIGHT - ((GAPS_SIZE * 2) + (BORDER_THICKNESS * 2)) - TITLEBAR_HEIGHT;
+    configRequest->width = SCREEN_WIDTH - ((GAPS_SIZE * 2) + (BORDER_THICKNESS * 2));
+
+    configRequest->x = (SCREEN_WIDTH / 2) - (configRequest->width / 2);
+    configRequest->y = (SCREEN_HEIGHT / 2) - (configRequest->height / 2) + TITLEBAR_HEIGHT;
+
+    configRequest->border_width = BORDER_THICKNESS;
+    configRequest->above = None;
+    configRequest->detail = Above;
+    configRequest->value_mask = CWX | CWY | CWWidth | CWHeight;
+
+	XSetWindowBorderWidth(dpy, e->xmaprequest.window, BORDER_THICKNESS);
+
+	XColor color;
+	color.red = 255 * 256;
+	color.green = 0 * 256;
+	color.blue = 0 * 256;
+	color.flags = DoRed | DoGreen | DoBlue;
+
+	Colormap colormap = DefaultColormap(dpy, DefaultScreen(dpy));
+	if (XAllocColor(dpy, colormap, &color)) {
+		XSetWindowBorder(dpy, e->xmaprequest.window, color.pixel);
+	} else
+		fprintf(stderr, "Error: Failed to allocate color for window border\n");
+
+    HandleConfigureRequest(&changes, configRequest);
+}
+
+void
+HandleConfigureRequest(XWindowChanges *changes, XConfigureRequestEvent *ev)
+{
+    changes->x = ev->x;
+    changes->y = ev->y;
+    changes->width = ev->width;
+    changes->height = ev->height;
+    changes->border_width = ev->border_width;
+    changes->sibling = ev->above;
+    changes->stack_mode = ev->detail;
+
+            /* Set border width */
+    XConfigureWindow(dpy, ev->window, ev->value_mask, changes);
+}
+
+void
+HandleKeyPress(XEvent *e, KeyCode key)
+{
+	if (e->xkey.keycode == key && (e->xkey.state & Mod1Mask))
+	{
+		if (fork() == 0) {
+			execlp("st", "", NULL);
+			exit(0);
+		}
+	}
+}
+
+void
+Cases(XEvent *e, KeyCode *enter)
+{
     switch (e->type) {
 
 		default: break;
-        case MapRequest: { XMapWindow(dpy, e -> xmaprequest.window); break; }
-        case DestroyNotify: { XDestroyWindow(dpy, e -> xdestroywindow.window); break; }
-
-        case ConfigureRequest: {
-            XWindowChanges changes;
-            HandleConfigureRequest(&changes, e);
-            break;
-        }
+        case DestroyNotify: { XDestroyWindow(dpy, e->xdestroywindow.window); break; }
 
         case KeyPress: {
-            if (e->xkey.keycode == keycode && (e->xkey.state & Mod1Mask)) {
-                if (fork() == 0) {
-                    execlp("st", "", NULL);
-                    exit(0);
-                }
-            }
+			HandleKeyPress(e, *enter);
+	  	}
+
+        case MapRequest: {
+            ConfigureWindowRequest(e);
+            XMapWindow(dpy, e->xmaprequest.window);
             break;
-        }
+		}
     }
 }
 
-void
-HandleConfigureRequest(XWindowChanges *changes, XEvent *e) {
-	if (e->xconfigurerequest.width > 0 && e->xconfigurerequest.height > 0) {
-	changes -> x = 			e -> xconfigurerequest.x;
-	changes -> y = 			e -> xconfigurerequest.y;
-	changes -> width = 1000;		//e -> xconfigurerequest.width;
-	changes -> height = 700;		//e -> xconfigurerequest.height;
-	changes -> border_width = 	e -> xconfigurerequest.border_width;
-	changes -> stack_mode = 	e -> xconfigurerequest.detail;
-	changes -> sibling = 		e -> xconfigurerequest.above;
-	} else {
-		Error("Invalid width or height in ConfigurationRequest event", -1, False);
-	}
-
-}
-
 int
-main(int argc, char *argv[]) {
+main(int argc, char *argv[])
+{
 	InitialChecks(argc, *argv);
-	Configure(); /* TODO */
 	Run();
 
 	XCloseDisplay(dpy);
