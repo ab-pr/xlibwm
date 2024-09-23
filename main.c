@@ -1,9 +1,11 @@
 #include <X11/X.h>
 #include <X11/Xlib.h>
+#include <X11/Xatom.h>
 #include <X11/Xutil.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "structs.h"
@@ -20,6 +22,9 @@ int BORDER_THICKNESS = 3;
 int TITLEBAR_HEIGHT = 5;
 int openWindows = 0;
 
+Client *clients = NULL;
+Client *focused_client = NULL;
+
 unsigned int NumLockMask = 0;
 
 
@@ -32,6 +37,8 @@ void InitialChecks(int, char *);
 void GrabKeys(void);
 
 // Requests
+void SpawnWindow(const Arg *);
+void CloseWindowUnderPointer(const Arg *arg);
 void ConfigureWindowRequest(XEvent *);
 void HandleConfigureRequest(XWindowChanges *, XConfigureRequestEvent *);
 
@@ -139,20 +146,6 @@ SpawnWindow(const Arg *arg)
 	}
 }
 
-/*
-void
-CloseWindow(const Arg *arg)
-{
-    Window focused;
-    int revert;
-
-    XGetInputFocus(dpy, &focused, &revert);
-    if (focused != None && focused != PointerRoot && focused != DefaultRootWindow(dpy)) {
-        XDestroyWindow(dpy, focused);
-    }
-}
-*/
-
 void
 GrabKeys(void)
 {
@@ -213,6 +206,68 @@ Cases(XEvent *e)
     }
 }
 
+
+
+Window
+GetWindowUnderPointer(void) {
+    Window root_return, child_return;
+    int root_x, root_y;
+    int win_x, win_y;
+    unsigned int mask_return;
+
+    if (XQueryPointer(dpy, DefaultRootWindow(dpy), &root_return, &child_return,
+                      &root_x, &root_y, &win_x, &win_y, &mask_return)) {
+        if (child_return != None) {
+            return child_return;
+        }
+    }
+    return None;
+}
+
+void
+CloseWindowUnderPointer(const Arg *arg) {
+    Window w = GetWindowUnderPointer();
+    if (w == None) {
+        fprintf(stderr, "No window under pointer to close.\n");
+        return;
+    }
+
+    Atom *protocols;
+    int n;
+    Atom WMDeleteWindow = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
+    Atom WMProtocols = XInternAtom(dpy, "WM_PROTOCOLS", False);
+
+    // Check if the window supports WM_DELETE_WINDOW
+    if (XGetWMProtocols(dpy, w, &protocols, &n)) {
+        Bool supports_delete = False;
+        for (int i = 0; i < n; ++i) {
+            if (protocols[i] == WMDeleteWindow) {
+                supports_delete = True;
+                break;
+            }
+        }
+        XFree(protocols);
+
+        if (supports_delete) {
+            // Send WM_DELETE_WINDOW message
+            XEvent ev;
+            ev.type = ClientMessage;
+            ev.xclient.window = w;
+            ev.xclient.message_type = WMProtocols;
+            ev.xclient.format = 32;
+            ev.xclient.data.l[0] = WMDeleteWindow;
+            ev.xclient.data.l[1] = CurrentTime;
+            XSendEvent(dpy, w, False, NoEventMask, &ev);
+        } else {
+            // If WM_DELETE_WINDOW is not supported, forcefully kill the window
+            XKillClient(dpy, w);
+        }
+    } else {
+        // If the window doesn't have WM_PROTOCOLS property, forcefully kill it
+        XKillClient(dpy, w);
+    }
+}
+
 void
 Setup(void)
 {
@@ -231,6 +286,7 @@ Setup(void)
     }
 
     XFreeModifiermap(modmap);
+
 }
 
 int
