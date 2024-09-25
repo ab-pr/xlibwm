@@ -1,7 +1,7 @@
 # Compiler and flags
 CC = gcc
 CFLAGS = -Wall -g
-LDFLAGS = -lX11
+LDFLAGS = -lX11 -lm
 
 # Target executable
 TARGET = main
