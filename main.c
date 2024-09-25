@@ -7,8 +7,11 @@
 #include <stdlib.h>
 #include <stdbool.h>
 <<<<<<< HEAD
+<<<<<<< HEAD
 #include <math.h>
 #include <time.h>
+=======
+>>>>>>> 258faa0 (Tiling works, you can exit the program safely, border colours work,)
 =======
 >>>>>>> 258faa0 (Tiling works, you can exit the program safely, border colours work,)
 #include <unistd.h>
@@ -37,6 +40,7 @@ Client *clients = NULL;
 unsigned int NumLockMask = 0;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 bool running = 0;
 
 /* Function Declarations */
@@ -44,6 +48,10 @@ bool running = 0;
 void Cases(XEvent *);
 void Parse(void);
 void Run(void);
+=======
+/* Function Declarations */
+// Main Loop
+>>>>>>> 258faa0 (Tiling works, you can exit the program safely, border colours work,)
 =======
 /* Function Declarations */
 // Main Loop
@@ -163,7 +171,11 @@ Error(const char *ErrorMessage, int ERROR_CODE, int EXIT)
 
 void
 <<<<<<< HEAD
+<<<<<<< HEAD
 Parse(void)
+=======
+Setup(void)
+>>>>>>> 258faa0 (Tiling works, you can exit the program safely, border colours work,)
 =======
 Setup(void)
 >>>>>>> 258faa0 (Tiling works, you can exit the program safely, border colours work,)
@@ -202,10 +214,17 @@ Run(void)
     Window root = DefaultRootWindow(dpy);
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	GrabKeys();
     XSelectInput(dpy, root, SubstructureRedirectMask | SubstructureNotifyMask | KeyPressMask);
 
 	running = true;
+=======
+    GrabKeys();
+
+    XSelectInput(dpy, root, SubstructureRedirectMask | SubstructureNotifyMask | KeyPressMask | DestroyNotify);
+
+>>>>>>> 258faa0 (Tiling works, you can exit the program safely, border colours work,)
 =======
     GrabKeys();
 
@@ -345,6 +364,7 @@ void
 ConfigureWindowRequest(XEvent *e)
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
     XConfigureRequestEvent *configRequest = &e->xconfigurerequest;
 
     AddClient(configRequest->window);
@@ -352,6 +372,8 @@ ConfigureWindowRequest(XEvent *e)
     XMapWindow(dpy, configRequest->window);
 
 =======
+=======
+>>>>>>> 258faa0 (Tiling works, you can exit the program safely, border colours work,)
     /* Configures the window before it is mapped */
     XWindowChanges changes;
     XConfigureRequestEvent *configRequest = &e->xconfigurerequest;
@@ -392,6 +414,7 @@ SpawnWindow(const Arg *arg)
     }
 }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 unsigned int
 CleanMask(unsigned int mask)
@@ -448,6 +471,9 @@ GetWindowUnderPointer(void) {
 		   childReturn;
 =======
 Window
+=======
+Window
+>>>>>>> 258faa0 (Tiling works, you can exit the program safely, border colours work,)
 GetWindowUnderPointer(void)
 {
     Window root_return, child_return;
@@ -518,10 +544,16 @@ CloseWindowUnderPointer(const Arg *arg)
     }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	RemoveClient(w);
     TileWindows();
 
 	XSync(dpy, False);
+=======
+    // Remove the client and retile windows
+    RemoveClient(w);
+    TileWindows();
+>>>>>>> 258faa0 (Tiling works, you can exit the program safely, border colours work,)
 =======
     // Remove the client and retile windows
     RemoveClient(w);
