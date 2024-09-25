@@ -1,19 +1,17 @@
-#include <X11/X.h>
-#include <X11/Xlib.h>
 #include <X11/Xutil.h>
+
 #define MOD Mod1Mask
 #define LENGTH(X) (sizeof X / sizeof X[0])
 
-typedef struct {
+typedef union {
     const char **cmd;
-    int ops;
 } Arg;
 
 typedef struct {
-    int mod;
+    unsigned int mod;
     KeySym key;
-    void (*fn) (const Arg *);
-    Arg arg;
+    void (*fn)(const Arg *);
+    const Arg arg;
 } Key;
 
 typedef struct Client {
