@@ -17,8 +17,7 @@ typedef struct {
 } Key;
 
 typedef struct Client {
-    Window win;
-    // ... other window properties ...
+    Window window;
     struct Client *next;
 } Client;
 
@@ -31,6 +30,6 @@ static const char *discord[] = {"discord", NULL};
 static const Key keys[] = {
     {MOD, XK_Return, SpawnWindow, {.cmd = terminal}},
     {MOD, XK_e, SpawnWindow, {.cmd = discord}},
-    {MOD | ShiftMask, XK_c, CloseWindowUnderPointer, {NULL}},
+    {MOD | ShiftMask, XK_q, CloseWindowUnderPointer, {NULL}},
 };
 

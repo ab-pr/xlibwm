@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <math.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -16,22 +17,22 @@
 /* Variables */
 Display *dpy;
 
-int GAPS_SIZE = 15;
 XColor BORDER_COLOUR;
-int BORDER_THICKNESS = 3;
-int TITLEBAR_HEIGHT = 5;
-int openWindows = 0;
+unsigned short GAPS_SIZE = 15;
+unsigned short BORDER_THICKNESS = 3;
+unsigned short TITLEBAR_HEIGHT = 5;
+unsigned short openWindows = 0;
 
 Client *clients = NULL;
-Client *focused_client = NULL;
 
 unsigned int NumLockMask = 0;
 
+bool running = 0;
 
 /* Function Declarations */
 // Main Loop
 void Cases(XEvent *);
-void Configure(void);
+void Parse(void);
 void Run(void);
 void InitialChecks(int, char *);
 void GrabKeys(void);
@@ -46,6 +47,75 @@ void HandleConfigureRequest(XWindowChanges *, XConfigureRequestEvent *);
 void Error(const char *, int, int);
 
 /* Functions */
+
+void Quit(const Arg *arg) {
+    running = 0;
+}
+
+void
+AddClient(Window w) {
+    Client *c = malloc(sizeof(Client));
+    c->window = w;
+    c->next = clients;
+    clients = c;
+    openWindows++;
+}
+
+void
+RemoveClient(Window w) {
+    Client **curr = &clients; // Current window
+    while (*curr) {
+        if ((*curr)->window == w) {
+            Client *tmp = *curr;
+            *curr = (*curr)->next;
+            free(tmp);
+            openWindows--;
+            break;
+        }
+        curr = &(*curr)->next;
+    }
+}
+
+void
+TileWindows() {
+    if (openWindows == 0) return;
+
+    int cols = (int) sqrt((double) openWindows);
+    int rows = (openWindows + cols - 1) / cols;
+    int winWidth = SCREEN_WIDTH / cols;
+    int winHeight = SCREEN_HEIGHT / rows;
+
+        BORDER_COLOUR.red   = 255 * 256;
+        BORDER_COLOUR.green = 000 * 256;
+        BORDER_COLOUR.blue  = 000 * 256;
+        BORDER_COLOUR.flags = DoRed | DoGreen | DoBlue;
+
+        Colormap colormap = DefaultColormap(dpy, DefaultScreen(dpy));
+		if (!XAllocColor(dpy, colormap, &BORDER_COLOUR))
+			fprintf(stderr, "Error: Failed to allocate color for window border\n");
+
+		else
+			XSetWindowBorder(dpy, clients->window, BORDER_COLOUR.pixel);
+
+    int i = 0;
+    Client *c = clients;
+    while (c) {
+        int x = (i % cols) * winWidth + GAPS_SIZE;
+        int y = (i / cols) * winHeight + GAPS_SIZE + TITLEBAR_HEIGHT;
+
+        XWindowChanges changes;
+        changes.x = x;
+        changes.y = y;
+        changes.width = winWidth - (GAPS_SIZE * 2) - (BORDER_THICKNESS * 2);
+        changes.height = winHeight - (GAPS_SIZE * 2) - (BORDER_THICKNESS * 2) - TITLEBAR_HEIGHT;
+        changes.border_width = BORDER_THICKNESS;
+
+        XConfigureWindow(dpy, c->window, CWX | CWY | CWWidth | CWHeight | CWBorderWidth, &changes);
+        i++;
+        c = c->next;
+    }
+}
+
 
 void
 InitialChecks(int argc, char *argv)
@@ -64,7 +134,7 @@ Error(const char *ErrorMessage, int ERROR_CODE, int EXIT)
 }
 
 void
-Configure(void)
+Parse(void)
 {
     /* Configures the custom settings set by the user */
 }
@@ -76,10 +146,10 @@ Run(void)
     Window root = DefaultRootWindow(dpy);
 
 	GrabKeys();
-
     XSelectInput(dpy, root, SubstructureRedirectMask | SubstructureNotifyMask | KeyPressMask);
 
-    for (;;) {
+	running = true;
+    while (running) {
         XEvent e;
         XNextEvent(dpy, &e);
         Cases(&e);
@@ -89,34 +159,12 @@ Run(void)
 void
 ConfigureWindowRequest(XEvent *e)
 {
-	/* Configures the window before it is mapped */
-    XWindowChanges changes;
     XConfigureRequestEvent *configRequest = &e->xconfigurerequest;
 
-    configRequest->height = SCREEN_HEIGHT - ((GAPS_SIZE * 2) + (BORDER_THICKNESS * 2)) - TITLEBAR_HEIGHT;
-    configRequest->width = SCREEN_WIDTH - ((GAPS_SIZE * 2) + (BORDER_THICKNESS * 2));
-    configRequest->x = (SCREEN_WIDTH / 2) - (configRequest->width / 2);
-    configRequest->y = (SCREEN_HEIGHT / 2) - (configRequest->height / 2) + TITLEBAR_HEIGHT;
-    configRequest->border_width = BORDER_THICKNESS;
-    configRequest->above = None;
-    configRequest->detail = Above;
-    configRequest->value_mask = CWX | CWY | CWWidth | CWHeight;
+    AddClient(configRequest->window);
+    TileWindows();
+    XMapWindow(dpy, configRequest->window);
 
-    XSetWindowBorderWidth(dpy, e->xmaprequest.window, BORDER_THICKNESS);
-
-    BORDER_COLOUR.red = 255 * 256;
-    BORDER_COLOUR.green = 0;
-    BORDER_COLOUR.blue = 0;
-    BORDER_COLOUR.flags = DoRed | DoGreen | DoBlue;
-
-    Colormap colormap = DefaultColormap(dpy, DefaultScreen(dpy));
-    if (XAllocColor(dpy, colormap, &BORDER_COLOUR)) {
-        XSetWindowBorder(dpy, e->xmaprequest.window, BORDER_COLOUR.pixel);
-    } else {
-        fprintf(stderr, "Error: Failed to allocate color for window border\n");
-    }
-
-    HandleConfigureRequest(&changes, configRequest);
 }
 
 void
@@ -168,7 +216,6 @@ CleanMask(unsigned int mask)
     return mask & ~(NumLockMask | LockMask);
 }
 
-
 void
 HandleKeyPress(XEvent *e)
 {
@@ -201,24 +248,34 @@ Cases(XEvent *e)
             XMapWindow(dpy, e->xmaprequest.window);
             break;
 
+        case DestroyNotify:
+            RemoveClient(e->xdestroywindow.window);
+            TileWindows();
+            break;
+
         default:
             break;
     }
 }
 
 
-
 Window
 GetWindowUnderPointer(void) {
-    Window root_return, child_return;
-    int root_x, root_y;
-    int win_x, win_y;
-    unsigned int mask_return;
+    Window rootReturn,
+		   childReturn;
 
-    if (XQueryPointer(dpy, DefaultRootWindow(dpy), &root_return, &child_return,
-                      &root_x, &root_y, &win_x, &win_y, &mask_return)) {
-        if (child_return != None) {
-            return child_return;
+    int rootX,
+		rootY;
+
+    int winX,
+		winY;
+
+    unsigned int maskReturn;
+
+    if (XQueryPointer(dpy, DefaultRootWindow(dpy), &rootReturn, &childReturn,
+                      &rootX, &rootY, &winX, &winY, &maskReturn)) {
+        if (childReturn != None) {
+            return childReturn;
         }
     }
     return None;
@@ -239,7 +296,7 @@ CloseWindowUnderPointer(const Arg *arg) {
 
     // Check if the window supports WM_DELETE_WINDOW
     if (XGetWMProtocols(dpy, w, &protocols, &n)) {
-        Bool supports_delete = False;
+        bool supports_delete = False;
         for (int i = 0; i < n; ++i) {
             if (protocols[i] == WMDeleteWindow) {
                 supports_delete = True;
@@ -266,6 +323,11 @@ CloseWindowUnderPointer(const Arg *arg) {
         // If the window doesn't have WM_PROTOCOLS property, forcefully kill it
         XKillClient(dpy, w);
     }
+
+	RemoveClient(w);
+    TileWindows();
+
+	XSync(dpy, False);
 }
 
 void
