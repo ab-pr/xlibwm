@@ -59,6 +59,8 @@ AddClient(Window w) {
     c->next = clients;
     clients = c;
     openWindows++;
+
+    XRaiseWindow(dpy, w);
 }
 
 void
@@ -80,42 +82,97 @@ void
 TileWindows() {
     if (openWindows == 0) return;
 
-    int cols = (int) sqrt((double) openWindows);
-    int rows = (openWindows + cols - 1) / cols;
-    int winWidth = SCREEN_WIDTH / cols;
-    int winHeight = SCREEN_HEIGHT / rows;
-
-        BORDER_COLOUR.red   = 255 * 256;
-        BORDER_COLOUR.green = 000 * 256;
-        BORDER_COLOUR.blue  = 000 * 256;
-        BORDER_COLOUR.flags = DoRed | DoGreen | DoBlue;
-
-        Colormap colormap = DefaultColormap(dpy, DefaultScreen(dpy));
-		if (!XAllocColor(dpy, colormap, &BORDER_COLOUR))
-			fprintf(stderr, "Error: Failed to allocate color for window border\n");
-
-		else
-			XSetWindowBorder(dpy, clients->window, BORDER_COLOUR.pixel);
-
+    Client *c;
     int i = 0;
-    Client *c = clients;
-    while (c) {
-        int x = (i % cols) * winWidth + GAPS_SIZE;
-        int y = (i / cols) * winHeight + GAPS_SIZE + TITLEBAR_HEIGHT;
 
+    int masterWidth;
+    int stackWidth;
+    int masterHeight;
+    int stackWinHeight;
+    int stackWindows = openWindows - 1; // Number of windows in the stack
+
+    int totalGapsWidth = GAPS_SIZE * 3; // Left, middle, and right gaps
+    int totalBordersWidth = BORDER_THICKNESS * 4; // Borders on both sides of master and stack areas
+
+    int availableHeight = SCREEN_HEIGHT - TITLEBAR_HEIGHT - (GAPS_SIZE * 2);
+
+    if (openWindows == 1) {
+        // Only one window, it takes the full screen minus gaps and borders
+        masterWidth = SCREEN_WIDTH - (GAPS_SIZE * 2) - (BORDER_THICKNESS * 2);
+        masterHeight = availableHeight - (BORDER_THICKNESS * 2);
+    } else {
+        // Master and stack areas split the screen width equally
+        masterWidth = (SCREEN_WIDTH - totalGapsWidth - totalBordersWidth) / 2;
+        stackWidth = masterWidth;
+
+        masterHeight = availableHeight - (BORDER_THICKNESS * 2);
+
+        // Calculate total gaps and borders height for stack windows
+        int totalGapsHeight = GAPS_SIZE * (stackWindows > 0 ? stackWindows - 1 : 0);
+        int totalBordersHeight = BORDER_THICKNESS * 2 * stackWindows;
+        int totalWindowAreaHeight = availableHeight - totalGapsHeight - totalBordersHeight;
+
+        // Calculate the height of each stack window
+        stackWinHeight = stackWindows > 0 ? totalWindowAreaHeight / stackWindows : 0;
+    }
+
+    // Positions
+    int masterX = GAPS_SIZE + BORDER_THICKNESS;
+    int masterY = GAPS_SIZE + TITLEBAR_HEIGHT + BORDER_THICKNESS;
+    int stackX = masterX + masterWidth + GAPS_SIZE + (BORDER_THICKNESS * 2);
+    int stackY = GAPS_SIZE + TITLEBAR_HEIGHT;
+
+    // Set border color
+    BORDER_COLOUR.red   = 255 * 256;
+    BORDER_COLOUR.green = 0;
+    BORDER_COLOUR.blue  = 0;
+    BORDER_COLOUR.flags = DoRed | DoGreen | DoBlue;
+
+    Colormap colormap = DefaultColormap(dpy, DefaultScreen(dpy));
+    if (!XAllocColor(dpy, colormap, &BORDER_COLOUR)) {
+        fprintf(stderr, "Error: Failed to allocate color for window border\n");
+    }
+
+    c = clients;
+    while (c) {
         XWindowChanges changes;
-        changes.x = x;
-        changes.y = y;
-        changes.width = winWidth - (GAPS_SIZE * 2) - (BORDER_THICKNESS * 2);
-        changes.height = winHeight - (GAPS_SIZE * 2) - (BORDER_THICKNESS * 2) - TITLEBAR_HEIGHT;
         changes.border_width = BORDER_THICKNESS;
 
+        if (i == 0) {
+            // Master window
+            changes.x = masterX;
+            changes.y = masterY;
+            changes.width = masterWidth;
+            changes.height = masterHeight;
+        } else {
+            // Stack windows
+            changes.x = stackX;
+            changes.y = stackY + BORDER_THICKNESS; // Adjust for border
+
+            changes.width = stackWidth;
+            changes.height = stackWinHeight;
+
+            // Adjust the last window to fill any remaining space
+            if (i == openWindows - 1) {
+                int usedHeight = stackY - (GAPS_SIZE + TITLEBAR_HEIGHT) + stackWinHeight + (BORDER_THICKNESS * 2);
+                int remainingHeight = availableHeight - usedHeight;
+                changes.height += remainingHeight;
+            }
+
+            // Update y position for next window
+            stackY += stackWinHeight + (BORDER_THICKNESS * 2) + GAPS_SIZE;
+        }
+
+        // Set window border color
+        XSetWindowBorder(dpy, c->window, BORDER_COLOUR.pixel);
+
+        // Apply window changes
         XConfigureWindow(dpy, c->window, CWX | CWY | CWWidth | CWHeight | CWBorderWidth, &changes);
+
         i++;
         c = c->next;
     }
 }
-
 
 void
 InitialChecks(int argc, char *argv)
