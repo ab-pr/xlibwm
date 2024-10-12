@@ -5,7 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include <math.h>
+#include <string.h>
+//#include <math.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -21,65 +22,266 @@ XColor BORDER_COLOUR;
 unsigned short GAPS_SIZE = 15;
 unsigned short BORDER_THICKNESS = 3;
 unsigned short TITLEBAR_HEIGHT = 5;
-unsigned short openWindows = 0;
+XColor normalColor;
+XColor focusColor;
+Colormap colormap;
 
+unsigned short openWindows = 0;
 Client *clients = NULL;
 
 unsigned int NumLockMask = 0;
-
 bool running = 0;
 
 /* Function Declarations */
-// Main Loop
-void Cases(XEvent *);
-void Parse(void);
-void Run(void);
-void InitialChecks(int, char *);
-void GrabKeys(void);
 
-// Requests
-void SpawnWindow(const Arg *);
-void CloseWindowUnderPointer(const Arg *arg);
+// Initialization Functions
+void InitialChecks(int , char *);
+void Parse(void);
+void Setup(void);
+
+// Main Loop Function
+void Run(void);
+
+// Event Handling Functions
+void Cases(XEvent *);
 void ConfigureWindowRequest(XEvent *);
+void HandleKeyPress(XEvent *);
+void HandleEnterNotify(XEvent *);
+void HandleLeaveNotify(XEvent *);
 void HandleConfigureRequest(XWindowChanges *, XConfigureRequestEvent *);
 
-// Misc
+// Key Handling Functions
+void GrabKeys(void);
+unsigned int CleanMask(unsigned int);
+
+// Window Management Functions
+void TileWindows(void);
+void CloseWindowUnderPointer(const Arg *);
+void SpawnWindow(const Arg *);
+void Quit(const Arg *);
+
+// Client Management Functions
+void AddClient(Window);
+void RemoveClient(Window);
+Client* FindClient(Window);
+
+// Utility Functions
+Window GetWindowUnderPointer(void);
+
+// Error Handling Function
 void Error(const char *, int, int);
 
 /* Functions */
 
-void Quit(const Arg *arg) {
-    running = 0;
+void
+InitialChecks(int argc, char *argv)
+{
+    /* Initial checks to make sure the program can run */
+    if (!(dpy = XOpenDisplay(NULL)))
+        Error("Can't open the display\n", EXIT_FAILURE, true);
 }
 
 void
-AddClient(Window w) {
-    Client *c = malloc(sizeof(Client));
-    c->window = w;
-    c->next = clients;
-    clients = c;
-    openWindows++;
+Setup(void)
+{
+    /* Main setup which gets the numlock keycode through bitwise operations */
 
-    XRaiseWindow(dpy, w);
-}
+    XModifierKeymap *modmap = XGetModifierMapping(dpy);
+    KeyCode numlock_keycode = XKeysymToKeycode(dpy, XK_Num_Lock);
 
-void
-RemoveClient(Window w) {
-    Client **curr = &clients; // Current window
-    while (*curr) {
-        if ((*curr)->window == w) {
-            Client *tmp = *curr;
-            *curr = (*curr)->next;
-            free(tmp);
-            openWindows--;
-            break;
+    for (int i = 0; i < 8; ++i) {
+        for (int j = 0; j < modmap->max_keypermod; ++j) {
+            if (modmap->modifiermap[i * modmap->max_keypermod + j] == numlock_keycode) {
+                NumLockMask = (1 << i);
+                break;
+            }
         }
-        curr = &(*curr)->next;
+    }
+
+    XFreeModifiermap(modmap);
+
+    // Initialize the colormap
+    colormap = DefaultColormap(dpy, DefaultScreen(dpy));
+
+    // Initialize normal border color (red)
+    normalColor.red   = 65535;
+    normalColor.green = 0;
+    normalColor.blue  = 0;
+    normalColor.flags = DoRed | DoGreen | DoBlue;
+
+    if (!XAllocColor(dpy, colormap, &normalColor)) {
+        fprintf(stderr, "Error: Failed to allocate normal border color\n");
+    }
+
+    // Initialize focus border color (green)
+    focusColor.red   = 0;
+    focusColor.green = 65535;
+    focusColor.blue  = 0;
+    focusColor.flags = DoRed | DoGreen | DoBlue;
+
+    if (!XAllocColor(dpy, colormap, &focusColor)) {
+        fprintf(stderr, "Error: Failed to allocate focus border color\n");
     }
 }
 
 void
-TileWindows() {
+Parse(void)
+{
+    /* Configures the custom settings set by the user */
+}
+
+void
+Run(void)
+{
+    /* Main loop of the program */
+    Window root = DefaultRootWindow(dpy);
+
+	GrabKeys();
+    XSelectInput(dpy, root, SubstructureRedirectMask | SubstructureNotifyMask | KeyPressMask);
+
+	running = true;
+    while (running) {
+        XEvent e;
+        XNextEvent(dpy, &e);
+        Cases(&e);
+    }
+}
+
+void
+Cases(XEvent *e)
+{
+    switch (e->type) {
+
+        case KeyPress:
+            HandleKeyPress(e);
+            break;
+
+        case MapRequest:
+            ConfigureWindowRequest(e);
+            break;
+
+        case EnterNotify:
+            HandleEnterNotify(e);
+            break;
+
+        case LeaveNotify:
+            HandleLeaveNotify(e);
+            break;
+
+        case DestroyNotify:
+            RemoveClient(e->xdestroywindow.window);
+            TileWindows();
+            break;
+
+        default:
+            break;
+    }
+}
+
+void
+ConfigureWindowRequest(XEvent *e)
+{
+    XConfigureRequestEvent *configRequest = &e->xconfigurerequest;
+
+    AddClient(configRequest->window);
+    TileWindows();
+    XMapWindow(dpy, configRequest->window);
+}
+
+
+void
+HandleKeyPress(XEvent *e)
+{
+	/*  Handles the key presses */
+    KeySym keysym = XLookupKeysym(&e->xkey, 0);
+    unsigned int mod = CleanMask(e->xkey.state);
+
+    for (int i = 0; i < LENGTH(keys); ++i) {
+        if (keysym == keys[i].key && mod == CleanMask(keys[i].mod)) {
+            if (keys[i].fn) {
+                keys[i].fn(&(keys[i].arg));
+            }
+            break;
+        }
+    }
+}
+
+void
+HandleEnterNotify(XEvent *e)
+{
+    XEnterWindowEvent *ev = &e->xcrossing;
+    Window w = ev->window;
+
+    // Check if the window is still in the client list
+    if (!FindClient(w)) {
+        // The window is no longer valid; ignore the event
+        return;
+    }
+
+    // Set the border color to indicate focus
+    XSetWindowBorder(dpy, w, focusColor.pixel);
+
+    // Optionally, set input focus to the window
+    XSetInputFocus(dpy, w, RevertToPointerRoot, CurrentTime);
+}
+
+void
+HandleLeaveNotify(XEvent *e)
+{
+    XLeaveWindowEvent *ev = &e->xcrossing;
+    Window w = ev->window;
+
+    // Check if the window is still in the client list
+    if (!FindClient(w)) {
+        // The window is no longer valid; ignore the event
+        return;
+    }
+
+    // Reset the border color to normal
+    XSetWindowBorder(dpy, w, normalColor.pixel);
+}
+
+void
+HandleConfigureRequest(XWindowChanges *changes, XConfigureRequestEvent *ev)
+{
+	/* Sets the changes */
+    changes->x = ev->x;
+    changes->y = ev->y;
+    changes->width = ev->width;
+    changes->height = ev->height;
+    changes->border_width = ev->border_width;
+    changes->sibling = ev->above;
+    changes->stack_mode = ev->detail;
+
+    /* Set border width */
+    XConfigureWindow(dpy, ev->window, ev->value_mask, changes);
+}
+
+void
+GrabKeys(void)
+{
+    XUngrabKey(dpy, AnyKey, AnyModifier, DefaultRootWindow(dpy));
+
+    for (unsigned int i = 0; i < LENGTH(keys); ++i) {
+        KeyCode code = XKeysymToKeycode(dpy, keys[i].key);
+        XGrabKey(dpy, code, keys[i].mod, DefaultRootWindow(dpy), True, GrabModeAsync, GrabModeAsync);
+
+		// Grabbing numcock
+        if (NumLockMask) {
+            XGrabKey(dpy, code, keys[i].mod | NumLockMask, DefaultRootWindow(dpy), True, GrabModeAsync, GrabModeAsync);
+        }
+    }
+}
+
+unsigned int
+CleanMask(unsigned int mask)
+{
+    return mask & ~(NumLockMask | LockMask);
+}
+
+void
+TileWindows(void)
+{
     if (openWindows == 0) return;
 
     Client *c;
@@ -122,17 +324,6 @@ TileWindows() {
     int stackX = masterX + masterWidth + GAPS_SIZE + (BORDER_THICKNESS * 2);
     int stackY = GAPS_SIZE + TITLEBAR_HEIGHT;
 
-    // Set border color
-    BORDER_COLOUR.red   = 255 * 256;
-    BORDER_COLOUR.green = 0;
-    BORDER_COLOUR.blue  = 0;
-    BORDER_COLOUR.flags = DoRed | DoGreen | DoBlue;
-
-    Colormap colormap = DefaultColormap(dpy, DefaultScreen(dpy));
-    if (!XAllocColor(dpy, colormap, &BORDER_COLOUR)) {
-        fprintf(stderr, "Error: Failed to allocate color for window border\n");
-    }
-
     c = clients;
     while (c) {
         XWindowChanges changes;
@@ -163,8 +354,8 @@ TileWindows() {
             stackY += stackWinHeight + (BORDER_THICKNESS * 2) + GAPS_SIZE;
         }
 
-        // Set window border color
-        XSetWindowBorder(dpy, c->window, BORDER_COLOUR.pixel);
+        // Set window border color to normal color
+        XSetWindowBorder(dpy, c->window, normalColor.pixel);
 
         // Apply window changes
         XConfigureWindow(dpy, c->window, CWX | CWY | CWWidth | CWHeight | CWBorderWidth, &changes);
@@ -175,171 +366,8 @@ TileWindows() {
 }
 
 void
-InitialChecks(int argc, char *argv)
+CloseWindowUnderPointer(const Arg *arg)
 {
-    /* Initial checks to make sure the program can run */
-    if (!(dpy = XOpenDisplay(NULL)))
-        Error("Can't open the display\n", EXIT_FAILURE, true);
-}
-
-void
-Error(const char *ErrorMessage, int ERROR_CODE, int EXIT)
-{
-    fprintf(stderr, "%s", ErrorMessage);
-    if (EXIT)
-        exit(ERROR_CODE);
-}
-
-void
-Parse(void)
-{
-    /* Configures the custom settings set by the user */
-}
-
-void
-Run(void)
-{
-    /* Main loop of the program */
-    Window root = DefaultRootWindow(dpy);
-
-	GrabKeys();
-    XSelectInput(dpy, root, SubstructureRedirectMask | SubstructureNotifyMask | KeyPressMask);
-
-	running = true;
-    while (running) {
-        XEvent e;
-        XNextEvent(dpy, &e);
-        Cases(&e);
-    }
-}
-
-void
-ConfigureWindowRequest(XEvent *e)
-{
-    XConfigureRequestEvent *configRequest = &e->xconfigurerequest;
-
-    AddClient(configRequest->window);
-    TileWindows();
-    XMapWindow(dpy, configRequest->window);
-
-}
-
-void
-HandleConfigureRequest(XWindowChanges *changes, XConfigureRequestEvent *ev)
-{
-	/* Sets the changes */
-    changes->x = ev->x;
-    changes->y = ev->y;
-    changes->width = ev->width;
-    changes->height = ev->height;
-    changes->border_width = ev->border_width;
-    changes->sibling = ev->above;
-    changes->stack_mode = ev->detail;
-
-    /* Set border width */
-    XConfigureWindow(dpy, ev->window, ev->value_mask, changes);
-}
-
-void
-SpawnWindow(const Arg *arg)
-{
-	if (!fork()) {
-		setsid();
-		execvp(((char **)arg->cmd)[0], (char **) arg->cmd);
-		fprintf(stderr, "execvp %s err", ((char **) arg->cmd)[0]);
-		exit(EXIT_SUCCESS);
-	}
-}
-
-void
-GrabKeys(void)
-{
-    XUngrabKey(dpy, AnyKey, AnyModifier, DefaultRootWindow(dpy));
-
-    for (unsigned int i = 0; i < LENGTH(keys); ++i) {
-        KeyCode code = XKeysymToKeycode(dpy, keys[i].key);
-        XGrabKey(dpy, code, keys[i].mod, DefaultRootWindow(dpy), True, GrabModeAsync, GrabModeAsync);
-
-		// Grabbing numcock
-        if (NumLockMask) {
-            XGrabKey(dpy, code, keys[i].mod | NumLockMask, DefaultRootWindow(dpy), True, GrabModeAsync, GrabModeAsync);
-        }
-    }
-}
-
-unsigned int
-CleanMask(unsigned int mask)
-{
-    return mask & ~(NumLockMask | LockMask);
-}
-
-void
-HandleKeyPress(XEvent *e)
-{
-	/*  Handles the key presses */
-    KeySym keysym = XLookupKeysym(&e->xkey, 0);
-    unsigned int mod = CleanMask(e->xkey.state);
-
-    for (int i = 0; i < LENGTH(keys); ++i) {
-        if (keysym == keys[i].key && mod == CleanMask(keys[i].mod)) {
-            if (keys[i].fn) {
-                keys[i].fn(&(keys[i].arg));
-            }
-            break;
-        }
-    }
-}
-
-void
-Cases(XEvent *e)
-{
-	/* Switch case for the events, notifications ect */
-    switch (e->type) {
-
-        case KeyPress:
-            HandleKeyPress(e);
-            break;
-
-        case MapRequest:
-            ConfigureWindowRequest(e);
-            XMapWindow(dpy, e->xmaprequest.window);
-            break;
-
-        case DestroyNotify:
-            RemoveClient(e->xdestroywindow.window);
-            TileWindows();
-            break;
-
-        default:
-            break;
-    }
-}
-
-
-Window
-GetWindowUnderPointer(void) {
-    Window rootReturn,
-		   childReturn;
-
-    int rootX,
-		rootY;
-
-    int winX,
-		winY;
-
-    unsigned int maskReturn;
-
-    if (XQueryPointer(dpy, DefaultRootWindow(dpy), &rootReturn, &childReturn,
-                      &rootX, &rootY, &winX, &winY, &maskReturn)) {
-        if (childReturn != None) {
-            return childReturn;
-        }
-    }
-    return None;
-}
-
-void
-CloseWindowUnderPointer(const Arg *arg) {
     Window w = GetWindowUnderPointer();
     if (w == None) {
         fprintf(stderr, "No window under pointer to close.\n");
@@ -388,25 +416,124 @@ CloseWindowUnderPointer(const Arg *arg) {
 }
 
 void
-Setup(void)
+SpawnWindow(const Arg *arg)
 {
-	/* Main setup which gets the numlock keycode through bitwise operations */
+	if (!fork()) {
+		setsid();
+		execvp(((char **)arg->cmd)[0], (char **) arg->cmd);
+		fprintf(stderr, "execvp %s err", ((char **) arg->cmd)[0]);
+		exit(EXIT_SUCCESS);
+	}
+}
 
-    XModifierKeymap *modmap = XGetModifierMapping(dpy);
-    KeyCode numlock_keycode = XKeysymToKeycode(dpy, XK_Num_Lock);
+void
+Quit(const Arg *arg)
+{
+    running = 0;
+}
 
-    for (int i = 0; i < 8; ++i) {
-        for (int j = 0; j < modmap->max_keypermod; ++j) {
-            if (modmap->modifiermap[i * modmap->max_keypermod + j] == numlock_keycode) {
-                NumLockMask = (1 << i);
-                break;
-            }
+void
+AddClient(Window w)
+{
+    Client *c = malloc(sizeof(Client));
+    if (!c) {
+        fprintf(stderr, "Error: Could not allocate memory for client\n");
+        return;
+    }
+    c->window = w;
+    c->next = clients;
+    clients = c;
+    openWindows++;
+
+    // Select Enter and Leave events for the window
+    XSelectInput(dpy, w, EnterWindowMask | LeaveWindowMask | FocusChangeMask | PropertyChangeMask | StructureNotifyMask);
+
+    // Bring the new window to the front
+    XRaiseWindow(dpy, w);
+}
+
+void
+RemoveClient(Window w)
+{
+    Client **curr = &clients; // Current window
+    while (*curr) {
+        if ((*curr)->window == w) {
+            Client *tmp = *curr;
+            *curr = (*curr)->next;
+            free(tmp);
+            openWindows--;
+            break;
+        }
+        curr = &(*curr)->next;
+    }
+}
+
+Client *
+FindClient(Window w)
+{
+    Client *c = clients;
+    while (c) {
+        if (c->window == w) {
+            return c;
+        }
+        c = c->next;
+    }
+    return NULL;
+}
+
+Window
+GetWindowUnderPointer(void)
+{
+    Window rootReturn,
+		   childReturn;
+
+    int rootX,
+		rootY;
+
+    int winX,
+		winY;
+
+    unsigned int maskReturn;
+
+    if (XQueryPointer(dpy, DefaultRootWindow(dpy), &rootReturn, &childReturn,
+                      &rootX, &rootY, &winX, &winY, &maskReturn)) {
+        if (childReturn != None) {
+            return childReturn;
         }
     }
-
-    XFreeModifiermap(modmap);
-
+    return None;
 }
+
+void
+Error(const char *ErrorMessage, int ERROR_CODE, int EXIT)
+{
+    fprintf(stderr, "%s", ErrorMessage);
+    if (EXIT)
+        exit(ERROR_CODE);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 int
 main(int argc, char *argv[])
